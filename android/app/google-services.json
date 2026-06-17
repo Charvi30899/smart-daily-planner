@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "873394852333",
+    "project_id": "smart-daily-planner-sdp",
+    "storage_bucket": "smart-daily-planner-sdp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:873394852333:android:1682d84c9c3c121e4817e4",
+        "android_client_info": {
+          "package_name": "com.example.smart_daily_planner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEkIBahHpWyj7d2gdOU8S1O-VYvDjJfEM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
