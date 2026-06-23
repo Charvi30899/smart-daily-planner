@@ -12,7 +12,7 @@ const String summaryCardName = 'SummaryCard';
 ///
 /// When the user signals they are finished for the day, the model emits a
 /// SummaryCard listing the tasks they completed, the tasks still remaining, and
-/// a short motivational message. Like [planCardItem], properties are written
+/// a short motivational message. Like the PlanCard, properties are written
 /// INLINE (siblings of "id"/"component"), and the styled outer container +
 /// header are supplied by the Today tab.
 final CatalogItem summaryCardItem = CatalogItem(
@@ -64,18 +64,9 @@ final CatalogItem summaryCardItem = CatalogItem(
           padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
           child: Row(
             children: [
-              const Icon(Icons.nightlight_round, color: kPurple, size: 20),
+              const Icon(Icons.nightlight_round, color: kSecondary, size: 20),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E1B4B),
-                  ),
-                ),
-              ),
+              Expanded(child: Text(title, style: AppText.cardTitle)),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
@@ -97,7 +88,7 @@ final CatalogItem summaryCardItem = CatalogItem(
 
         _SummarySection(
           icon: Icons.check_circle,
-          iconColor: Colors.green,
+          iconColor: kPriorityLow,
           label: 'Completed',
           emptyText: 'Nothing checked off yet — that\'s okay.',
           items: completed,
@@ -106,7 +97,7 @@ final CatalogItem summaryCardItem = CatalogItem(
         const SizedBox(height: 12),
         _SummarySection(
           icon: Icons.hourglass_bottom_rounded,
-          iconColor: Colors.orange,
+          iconColor: kPriorityMedium,
           label: 'Remaining',
           emptyText: 'All clear — everything is done! 🎉',
           items: remaining,
@@ -119,14 +110,14 @@ final CatalogItem summaryCardItem = CatalogItem(
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: kIndigo.withValues(alpha: 0.07),
+              color: kPrimary.withValues(alpha: 0.07),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: kIndigo.withValues(alpha: 0.15)),
+              border: Border.all(color: kPrimary.withValues(alpha: 0.15)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.auto_awesome, size: 18, color: kIndigo),
+                const Text('🤖', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -134,7 +125,7 @@ final CatalogItem summaryCardItem = CatalogItem(
                     style: const TextStyle(
                       fontSize: 14,
                       height: 1.4,
-                      color: Color(0xFF1E1B4B),
+                      color: kTextPrimary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -178,14 +169,7 @@ class _SummarySection extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: iconColor),
               const SizedBox(width: 8),
-              Text(
-                '$label (${items.length})',
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1E1B4B),
-                ),
-              ),
+              Text('$label (${items.length})', style: AppText.sectionTitle),
             ],
           ),
           const SizedBox(height: 6),
@@ -194,11 +178,7 @@ class _SummarySection extends StatelessWidget {
               padding: const EdgeInsets.only(left: 26, top: 2),
               child: Text(
                 emptyText,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey.shade600,
-                  fontStyle: FontStyle.italic,
-                ),
+                style: AppText.secondary.copyWith(fontStyle: FontStyle.italic),
               ),
             )
           else
@@ -218,7 +198,7 @@ class _SummarySection extends StatelessWidget {
                         name,
                         style: TextStyle(
                           fontSize: 14,
-                          color: strikeThrough ? Colors.grey : null,
+                          color: strikeThrough ? kTextSecondary : kTextPrimary,
                           decoration: strikeThrough
                               ? TextDecoration.lineThrough
                               : TextDecoration.none,

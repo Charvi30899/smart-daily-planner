@@ -2,25 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
+import 'app_theme.dart';
+
 /// The widget type name the AI references in A2UI JSON to build this card.
 const String planCardName = 'PlanCard';
 
 /// Live task-completion progress for the currently pinned plan. Updated by
 /// [planCardItem] every time a PlanCard rebuilds (e.g. after a task is checked
-/// off and the model returns a fresh card). The app bar progress ring in
-/// HomeScreen listens to this so the percentage updates as tasks are ticked.
+/// off and the model returns a fresh card). The app bar progress ring and the
+/// History tab listen to this so they stay in sync as tasks are ticked.
 final ValueNotifier<({int completed, int total})> planProgressNotifier =
     ValueNotifier<({int completed, int total})>((completed: 0, total: 0));
 
-/// A custom [CatalogItem] that renders a daily plan.
+/// A custom [CatalogItem] that renders the task rows of a daily plan.
 ///
-/// In genui 0.9.2, a [CatalogItem] is a value (not a base class to extend).
-/// It pairs a [name], a [Schema] describing the data the AI must produce, and a
-/// `widgetBuilder` that receives a [CatalogItemContext].
-///
-/// The card reads literal values out of [CatalogItemContext.data] (the JSON the
-/// AI emits) and dispatches a [UserActionEvent] when a task is checked off, so
-/// the framework forwards it back to the model as the next turn's context.
+/// The styled card chrome (white card, header, date, divider, scroll) is
+/// supplied by the Today tab's plan container, so this builder renders ONLY the
+/// task rows. It reads literal values out of [CatalogItemContext.data] (the
+/// JSON the AI emits) and dispatches a [UserActionEvent] when a task is checked
+/// off, so the framework forwards it back to the model as the next turn's
+/// context.
 final CatalogItem planCardItem = CatalogItem(
   name: planCardName,
   dataSchema: S.object(
@@ -53,15 +54,12 @@ final CatalogItem planCardItem = CatalogItem(
     },
     required: ['title', 'tasks'],
   ),
-  // Renders ONLY the task rows. The styled card, header ("Today's Plan") and
-  // date are provided by the container in the Today tab, so this stays a plain
-  // Column to avoid nested cards / duplicate headers.
   widgetBuilder: (itemContext) {
     final data = itemContext.data as Map<String, Object?>;
     final tasks = (data['tasks'] as List<Object?>? ?? const []);
 
-    // Feature 2: push live completion stats to the app bar progress ring.
-    // Done in a post-frame callback so we never mutate the notifier mid-build.
+    // Feature 2: push live completion stats to the app bar progress ring. Done
+    // in a post-frame callback so we never mutate the notifier mid-build.
     final total = tasks.length;
     final completed = tasks.where((t) {
       final m = t as Map<String, Object?>;
@@ -72,10 +70,7 @@ final CatalogItem planCardItem = CatalogItem(
     });
 
     if (tasks.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('No tasks yet.', style: TextStyle(color: Colors.grey)),
-      );
+      return const _EmptyTasks();
     }
 
     return Column(
@@ -90,6 +85,9 @@ final CatalogItem planCardItem = CatalogItem(
           final completeAction = t['completeAction'] as String? ?? '';
 
           return _TaskRow(
+            // Stable key so Flutter preserves the element across genui rebuilds
+            // and the completion animation plays when isCompleted flips.
+            key: ValueKey('task_$completeAction'),
             name: name,
             priority: priority,
             isCompleted: isCompleted,
@@ -109,6 +107,35 @@ final CatalogItem planCardItem = CatalogItem(
   },
 );
 
+/// Shown when a PlanCard arrives with no tasks.
+class _EmptyTasks extends StatelessWidget {
+  const _EmptyTasks();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Column(
+        children: [
+          Icon(
+            Icons.check_circle_outline,
+            size: 40,
+            color: kPrimary.withValues(alpha: 0.35),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Chat below to add your first task',
+            style: AppText.secondary,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A single task row: indigo checkbox + priority pill + name. Subtly slides and
+/// fades when marked complete.
 class _TaskRow extends StatelessWidget {
   final String name;
   final String priority;
@@ -116,66 +143,88 @@ class _TaskRow extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _TaskRow({
+    super.key,
     required this.name,
     required this.priority,
     required this.isCompleted,
     this.onTap,
   });
 
-  Color _priorityColor() {
-    switch (priority) {
-      case 'high':
-        return Colors.red;
-      case 'medium':
-        return Colors.orange;
-      case 'low':
-        return Colors.green;
-      default:
-        return Colors.grey;
-    }
+  @override
+  Widget build(BuildContext context) {
+    final color = priorityColor(priority);
+
+    return AnimatedSlide(
+      offset: isCompleted ? const Offset(0.04, 0) : Offset.zero,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      child: AnimatedOpacity(
+        opacity: isCompleted ? 0.55 : 1,
+        duration: const Duration(milliseconds: 300),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Checkbox(
+                    value: isCompleted,
+                    onChanged: onTap == null ? null : (_) => onTap!(),
+                    activeColor: kPrimary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _PriorityBadge(priority: priority, color: color),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.3,
+                      color: isCompleted ? kTextSecondary : kTextPrimary,
+                      decoration: isCompleted
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
+}
+
+/// A pill-shaped priority badge (HIGH / MEDIUM / LOW).
+class _PriorityBadge extends StatelessWidget {
+  final String priority;
+  final Color color;
+
+  const _PriorityBadge({required this.priority, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    final color = _priorityColor();
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Checkbox(
-            value: isCompleted,
-            onChanged: onTap == null ? null : (_) => onTap!(),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color),
-            ),
-            child: Text(
-              priority.toUpperCase(),
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              name,
-              style: TextStyle(
-                fontSize: 14,
-                decoration: isCompleted
-                    ? TextDecoration.lineThrough
-                    : TextDecoration.none,
-                color: isCompleted ? Colors.grey : null,
-              ),
-            ),
-          ),
-        ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.55)),
+      ),
+      child: Text(
+        priority.toUpperCase(),
+        style: AppText.badge.copyWith(color: color),
       ),
     );
   }

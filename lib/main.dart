@@ -25,9 +25,10 @@ class SmartDailyPlannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: kIndigo,
-      primary: kIndigo,
-      secondary: kPurple,
+      seedColor: kPrimary,
+      primary: kPrimary,
+      secondary: kSecondary,
+      surface: kSurface,
     );
 
     return MaterialApp(
@@ -36,22 +37,20 @@ class SmartDailyPlannerApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: colorScheme,
-        scaffoldBackgroundColor: kScaffoldBg,
+        scaffoldBackgroundColor: kBg,
+        textSelectionTheme: const TextSelectionThemeData(cursorColor: kPrimary),
         navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: Colors.white,
-          indicatorColor: kIndigo.withValues(alpha: 0.12),
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            final selected = states.contains(WidgetState.selected);
-            return TextStyle(
-              fontSize: 12,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-              color: selected ? kIndigo : Colors.grey.shade600,
-            );
-          }),
+          backgroundColor: kSurface,
+          elevation: 3,
+          height: 64,
+          // Clean, minimal: icons only.
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+          indicatorColor: kPrimary.withValues(alpha: 0.12),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return IconThemeData(
-              color: selected ? kIndigo : Colors.grey.shade600,
+              color: selected ? kPrimary : kTextSecondary,
+              size: 26,
             );
           }),
         ),

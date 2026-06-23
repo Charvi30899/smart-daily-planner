@@ -4,18 +4,13 @@ import 'package:genui/genui.dart';
 
 import 'app_theme.dart';
 import 'history_tab.dart';
+import 'mood_bar.dart';
 import 'onboarding_setup.dart';
-import 'settings_tab.dart';
 import 'plan_card.dart';
+import 'progress_ring.dart';
+import 'settings_tab.dart';
 import 'summary_card.dart';
 import 'today_tab.dart';
-
-/// One selectable mood in the mood-based planning row (Feature 4).
-class _Mood {
-  final String emoji;
-  final String label;
-  const _Mood(this.emoji, this.label);
-}
 
 /// The main screen. Owns ALL genui wiring (SurfaceController, Conversation,
 /// A2uiTransportAdapter, the Gemini chat session) so it persists across tab
@@ -40,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<({String text, bool isUser})> _messages = [];
+  final List<ChatEntry> _messages = [];
 
   // Index of the assistant bubble currently being streamed. The model's prose
   // arrives as several trimmed text fragments per turn; we append them into a
@@ -48,27 +43,22 @@ class _HomeScreenState extends State<HomeScreen> {
   int _activeAssistantIndex = -1;
 
   // Surfaces the AI has actually created (tracked via ConversationSurfaceAdded).
-  // We only build a Surface widget for an id in this list, guaranteeing the
-  // surface already has a non-null definition.
   final List<String> _surfaceIds = [];
 
   bool _isLoading = false;
   bool _hasText = false;
 
   // ---- mood-based planning (Feature 4) -----------------------------------
-  static const List<_Mood> _moods = [
-    _Mood('😴', 'Drained'),
-    _Mood('😐', 'Meh'),
-    _Mood('🙂', 'Okay'),
-    _Mood('💪', 'Energized'),
-    _Mood('🔥', 'On fire'),
-  ];
   int _selectedMood = -1;
+
+  // ---- history (last 5 plan sessions, in memory) -------------------------
+  final List<PlanSession> _sessions = [];
 
   // ---- navigation --------------------------------------------------------
   int _tab = 0;
 
-  static final String _plannerInstructions = '''
+  static final String _plannerInstructions =
+      '''
 You are a smart daily planning assistant. Help users organize their day.
 
 When the user describes tasks or asks to plan their day, ALWAYS respond by
@@ -106,9 +96,9 @@ MOOD-BASED PLANNING:
 When a message says "User is feeling [mood] today", re-prioritize the CURRENT
 plan to match that energy and respond with a NEW PlanCard (fresh surfaceId)
 plus a short encouraging note:
-- Low energy (Drained / Meh): surface fewer, lighter tasks first and soften
+- Low energy (Tired / Neutral): surface fewer, lighter tasks first and soften
   priorities; move demanding work down.
-- High energy (Energized / On fire): front-load the high-priority, demanding
+- High energy (Energized / On Fire): front-load the high-priority, demanding
   tasks while momentum is there.
 If no plan exists yet, suggest a few tasks that suit the mood.
 
@@ -123,38 +113,6 @@ and "component": "SummaryCard", with these INLINE properties:
   - "remainingTasks": array of the names of tasks still not complete.
   - "message": a warm, motivational one or two sentence closing message.
 Include a short friendly text reply too.
-
-EXAMPLE — end-of-day summary, exactly two blocks:
-
-```json
-{
-  "version": "v0.9",
-  "createSurface": {
-    "surfaceId": "summary_1",
-    "catalogId": "$basicCatalogId",
-    "sendDataModel": true
-  }
-}
-```
-
-```json
-{
-  "version": "v0.9",
-  "updateComponents": {
-    "surfaceId": "summary_1",
-    "components": [
-      {
-        "id": "root",
-        "component": "SummaryCard",
-        "title": "Day Wrapped",
-        "completedTasks": ["Finish the report"],
-        "remainingTasks": ["Water the plants"],
-        "message": "Great focus today — you cleared the big one. Rest up!"
-      }
-    ]
-  }
-}
-```
 
 EXAMPLE — for the request "plan my day: finish the report, water the plants",
 respond with a brief sentence and then exactly these two blocks:
@@ -184,6 +142,38 @@ respond with a brief sentence and then exactly these two blocks:
           {"name": "Finish the report", "priority": "high", "isCompleted": false, "completeAction": "complete_task_1"},
           {"name": "Water the plants", "priority": "low", "isCompleted": false, "completeAction": "complete_task_2"}
         ]
+      }
+    ]
+  }
+}
+```
+
+EXAMPLE — end-of-day summary, exactly two blocks:
+
+```json
+{
+  "version": "v0.9",
+  "createSurface": {
+    "surfaceId": "summary_1",
+    "catalogId": "$basicCatalogId",
+    "sendDataModel": true
+  }
+}
+```
+
+```json
+{
+  "version": "v0.9",
+  "updateComponents": {
+    "surfaceId": "summary_1",
+    "components": [
+      {
+        "id": "root",
+        "component": "SummaryCard",
+        "title": "Day Wrapped",
+        "completedTasks": ["Finish the report"],
+        "remainingTasks": ["Water the plants"],
+        "message": "Great focus today — you cleared the big one. Rest up!"
       }
     ]
   }
@@ -234,11 +224,18 @@ respond with a brief sentence and then exactly these two blocks:
           setState(() {
             if (_activeAssistantIndex >= 0 &&
                 _activeAssistantIndex < _messages.length) {
-              final existing = _messages[_activeAssistantIndex].text;
-              _messages[_activeAssistantIndex] =
-                  (text: '$existing $fragment', isUser: false);
+              final existing = _messages[_activeAssistantIndex];
+              _messages[_activeAssistantIndex] = (
+                text: '${existing.text} $fragment',
+                isUser: false,
+                time: existing.time,
+              );
             } else {
-              _messages.add((text: fragment, isUser: false));
+              _messages.add((
+                text: fragment,
+                isUser: false,
+                time: DateTime.now(),
+              ));
               _activeAssistantIndex = _messages.length - 1;
             }
           });
@@ -254,7 +251,11 @@ respond with a brief sentence and then exactly these two blocks:
         case ConversationError(:final error):
           setState(() {
             _isLoading = false;
-            _messages.add((text: 'Error: $error', isUser: false));
+            _messages.add((
+              text: 'Error: $error',
+              isUser: false,
+              time: DateTime.now(),
+            ));
           });
         default:
           break;
@@ -270,6 +271,9 @@ respond with a brief sentence and then exactly these two blocks:
       final hasText = _textController.text.trim().isNotEmpty;
       if (hasText != _hasText) setState(() => _hasText = hasText);
     });
+
+    // Keep the History tab in sync as task-completion progress changes.
+    planProgressNotifier.addListener(_onProgressChanged);
 
     // Feature 1: kick off a personalized greeting + first plan from the
     // onboarding answers once the first frame is up. Sent as context (no user
@@ -311,7 +315,9 @@ respond with a brief sentence and then exactly these two blocks:
   void _sendMessage(String text) {
     if (text.trim().isEmpty) return;
     _textController.clear();
-    setState(() => _messages.add((text: text, isUser: true)));
+    setState(() {
+      _messages.add((text: text, isUser: true, time: DateTime.now()));
+    });
     _scrollToBottom();
     _conversation.sendRequest(ChatMessage.user(text));
   }
@@ -320,21 +326,49 @@ respond with a brief sentence and then exactly these two blocks:
   /// it can re-prioritize the plan. We show a short user bubble for context.
   void _sendMood(int index) {
     if (_isLoading) return;
-    final mood = _moods[index];
+    final mood = kMoods[index];
     setState(() {
       _selectedMood = index;
       _messages.add((
-        text: "I'm feeling ${mood.emoji} ${mood.label.toLowerCase()} today",
+        text: "I'm feeling ${mood.emoji} ${mood.name.toLowerCase()} today",
         isUser: true,
+        time: DateTime.now(),
       ));
     });
     _scrollToBottom();
     _conversation.sendRequest(
       ChatMessage.user(
-        'User is feeling ${mood.label} ${mood.emoji} today. Adjust the task '
+        'User is feeling ${mood.name} ${mood.emoji} today. Adjust the task '
         'priorities in their plan to match this energy level.',
       ),
     );
+  }
+
+  /// Upserts today's session into the in-memory history (capped to 5).
+  void _onProgressChanged() {
+    if (!mounted) return;
+    final p = planProgressNotifier.value;
+    if (p.total == 0) return;
+    final now = DateTime.now();
+    setState(() {
+      _sessions.removeWhere((s) => s.sameDayAs(now));
+      _sessions.insert(
+        0,
+        PlanSession(date: now, taskCount: p.total, completed: p.completed),
+      );
+      if (_sessions.length > 5) {
+        _sessions.removeRange(5, _sessions.length);
+      }
+    });
+  }
+
+  /// Settings action: clear the displayed plan and reset progress/mood.
+  void _clearPlan() {
+    setState(() {
+      _surfaceIds.clear();
+      _selectedMood = -1;
+    });
+    planProgressNotifier.value = (completed: 0, total: 0);
   }
 
   void _scrollToBottom() {
@@ -351,6 +385,7 @@ respond with a brief sentence and then exactly these two blocks:
 
   @override
   void dispose() {
+    planProgressNotifier.removeListener(_onProgressChanged);
     _conversation.dispose();
     _transport.dispose();
     _surfaceController.dispose();
@@ -366,50 +401,37 @@ respond with a brief sentence and then exactly these two blocks:
     const titles = ['Smart Daily Planner', 'History', 'Settings'];
 
     return Scaffold(
+      backgroundColor: kBg,
       appBar: AppBar(
         automaticallyImplyLeading: false,
         elevation: 0,
+        scrolledUnderElevation: 0,
         foregroundColor: Colors.white,
         flexibleSpace: const DecoratedBox(
           decoration: BoxDecoration(gradient: kAppGradient),
         ),
         title: Row(
           children: [
-            const Icon(Icons.calendar_month_rounded, size: 22),
+            const Text('📅', style: TextStyle(fontSize: 20)),
             const SizedBox(width: 8),
-            Text(
-              titles[_tab],
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.2,
+            Flexible(
+              child: Text(
+                titles[_tab],
+                style: AppText.appBarTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
-        // Feature 2: live progress ring reflecting % of tasks completed.
-        actions: [
-          ValueListenableBuilder<({int completed, int total})>(
-            valueListenable: planProgressNotifier,
-            builder: (context, progress, _) {
-              if (progress.total == 0) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(right: 14),
-                child: _ProgressRing(
-                  completed: progress.completed,
-                  total: progress.total,
-                ),
-              );
-            },
-          ),
-        ],
+        actions: const [AppBarProgressRing()],
       ),
       body: Column(
         children: [
           // Feature 4: mood selector row, shown right below the app bar on the
-          // Today tab.
+          // Today tab only.
           if (_tab == 0)
-            _MoodBar(
-              moods: _moods,
+            MoodBar(
               selectedIndex: _selectedMood,
               enabled: !_isLoading,
               onSelect: _sendMood,
@@ -428,8 +450,8 @@ respond with a brief sentence and then exactly these two blocks:
                   canSend: _hasText && !_isLoading,
                   onSend: _sendMessage,
                 ),
-                const HistoryTab(),
-                const SettingsTab(),
+                HistoryTab(sessions: _sessions),
+                SettingsTab(onClearPlan: _clearPlan),
               ],
             ),
           ),
@@ -453,137 +475,6 @@ respond with a brief sentence and then exactly these two blocks:
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings),
             label: 'Settings',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Feature 2 — a compact circular progress ring with the completion percentage
-/// in its center, sized to sit in the app bar.
-class _ProgressRing extends StatelessWidget {
-  final int completed;
-  final int total;
-
-  const _ProgressRing({required this.completed, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = total == 0 ? 0.0 : completed / total;
-    return Tooltip(
-      message: '$completed of $total tasks done',
-      child: SizedBox(
-        width: 40,
-        height: 40,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            SizedBox(
-              width: 38,
-              height: 38,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: pct),
-                duration: const Duration(milliseconds: 450),
-                curve: Curves.easeOut,
-                builder: (context, value, _) => CircularProgressIndicator(
-                  value: value,
-                  strokeWidth: 4,
-                  backgroundColor: Colors.white.withValues(alpha: 0.28),
-                  valueColor: const AlwaysStoppedAnimation(Colors.white),
-                ),
-              ),
-            ),
-            Text(
-              '${(pct * 100).round()}%',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10.5,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Feature 4 — the mood selector row. Tapping an emoji highlights it and pushes
-/// the chosen mood up to [_HomeScreenState] via [onSelect].
-class _MoodBar extends StatelessWidget {
-  final List<_Mood> moods;
-  final int selectedIndex;
-  final bool enabled;
-  final void Function(int index) onSelect;
-
-  const _MoodBar({
-    required this.moods,
-    required this.selectedIndex,
-    required this.enabled,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Text(
-            'Mood',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade600,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(moods.length, (i) {
-                final selected = i == selectedIndex;
-                return GestureDetector(
-                  onTap: enabled ? () => onSelect(i) : null,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? kIndigo.withValues(alpha: 0.14)
-                          : Colors.transparent,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: selected ? kIndigo : Colors.grey.shade200,
-                        width: selected ? 1.6 : 1,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Opacity(
-                      opacity: enabled ? 1 : 0.45,
-                      child: Text(
-                        moods[i].emoji,
-                        style: const TextStyle(fontSize: 22),
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ),
           ),
         ],
       ),
